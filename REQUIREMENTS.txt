@@ -1,0 +1,8 @@
+torch
+pytorch-lightning
+onnx
+onnxruntime
+numpy
+scikit-learn
+torchmetrics
+tqdm
