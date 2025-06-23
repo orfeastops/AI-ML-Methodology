@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+*.env
+
+# Data and Models - DO NOT UPLOAD
+/radar_data/
+/radar_models/
+
+# IDE files
+.idea/
+.vscode/
