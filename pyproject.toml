@@ -1,0 +1,25 @@
+[project]
+name = "ai-ml-methodology"
+version = "0.1.0"
+description = "Ballistic target identification and trajectory regression with uncertainty estimation."
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.23",
+    "torch>=2.0",
+    "pytorch-lightning>=2.0",
+    "torchmetrics>=0.11",
+    "scikit-learn>=1.0",
+    "tqdm>=4.0",
+    "onnx>=1.13",
+    "onnxruntime>=1.15",
+    "onnxruntime-gpu>=1.15"
+]
+requires-python = ">=3.8"
+
+[tool.black]
+line-length = 88
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

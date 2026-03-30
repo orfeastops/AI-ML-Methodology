@@ -1,8 +1,9 @@
-torch
-pytorch-lightning
-onnx
-onnxruntime
-numpy
-scikit-learn
-torchmetrics
-tqdm
+torch>=2.0
+pytorch-lightning>=2.0
+onnx>=1.13
+onnxruntime>=1.15
+numpy>=1.23
+scikit-learn>=1.0
+torchmetrics>=0.11
+tqdm>=4.0
+wandb>=0.15
