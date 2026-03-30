@@ -1,8 +1,7 @@
 # Radar-Based Object Classification & Tracking
 
 **Production-ready ML pipeline for real-time classification and trajectory prediction of radar-tracked objects: missiles, aircraft, ships, UAVs.**
-
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue)](https://www.python.org/)
+[![Tests](https://github.com/orfeastops/AI-ML-Methodology/actions/workflows/test.yml/badge.svg)](https://github.com/orfeastops/AI-ML-Methodology/actions) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue)](https://www.python.org/)
 
 ## 🚀 Key Features
 
