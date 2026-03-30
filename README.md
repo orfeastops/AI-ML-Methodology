@@ -278,7 +278,7 @@ Areas looking for help:
 
 - **Issues**: Report bugs or feature requests
 - **Discussions**: Join community discussions
-- **Email**: [maintainer contact]
+- **Email**:cearsiwer@hotmail.com
 
 ## 📜 License & Citation
 
