@@ -29,33 +29,61 @@ MISSILE_SPECS = {
 # Physics helpers
 g = 9.81
 
-def ballistic_state(t, v0=1700., theta_deg=45.):
+# Ballistic drag coefficient: rho*Cd*A / (2*m)
+# Typical values for a ~500kg missile body: ~6e-5 m^-1
+DRAG_COEFF = 6e-5
+
+def ballistic_state(t, v0=1700., theta_deg=45., drag=DRAG_COEFF):
+    """Euler-integrated ballistic trajectory with quadratic aerodynamic drag.
+    More realistic than ideal parabolic flight — drag reduces range and
+    creates asymmetric velocity profiles that help distinguish missile types."""
     theta = np.deg2rad(theta_deg)
-    v0x, v0y = v0 * np.cos(theta), v0 * np.sin(theta)
-    x = v0x * t
-    y = v0y * t - 0.5 * g * t**2
-    vx = np.full_like(t, v0x)
-    vy = v0y - g * t
+    n = len(t)
+    x  = np.zeros(n, dtype=np.float64)
+    y  = np.zeros(n, dtype=np.float64)
+    vx = np.zeros(n, dtype=np.float64)
+    vy = np.zeros(n, dtype=np.float64)
+    vx[0] = v0 * np.cos(theta)
+    vy[0] = v0 * np.sin(theta)
+
+    for i in range(1, n):
+        dt_step = t[i] - t[i - 1]
+        speed   = np.sqrt(vx[i-1]**2 + vy[i-1]**2)
+        ax = -drag * speed * vx[i-1]
+        ay = -g - drag * speed * vy[i-1]
+        vx[i] = vx[i-1] + ax * dt_step
+        vy[i] = vy[i-1] + ay * dt_step
+        x[i]  = x[i-1]  + vx[i-1] * dt_step
+        y[i]  = y[i-1]  + vy[i-1] * dt_step
+
     return x, y, vx, vy
 
 def range_doppler_snapshot(x, y, vx, vy):
-    R = np.hypot(x, y) + 1e-6
+    R  = np.hypot(x, y) + 1e-6
     vr = (x * vx + y * vy) / R
     az = np.arctan2(x, y)
     el = np.arctan2(y, x)
     return np.stack([R, vr, az, el], axis=-1)
 
 def simulate_track(v0, theta):
-    t = np.arange(0, T_MAX, DT)
+    t    = np.arange(0, T_MAX, DT)
     x, y, vx, vy = ballistic_state(t, v0, theta)
     snap = range_doppler_snapshot(x, y, vx, vy)
-    noise = np.random.normal(0, NOISE_STD, snap.shape)
+
+    # Correlated noise base (AR process per channel)
+    raw   = np.random.normal(0, NOISE_STD, snap.shape)
+    noise = raw.copy()
+    ar    = 0.85   # autocorrelation — realistic radar measurement error
+    innov = np.sqrt(1 - ar**2)   # keeps variance equal to NOISE_STD^2
     for i in range(1, len(noise)):
-        # Introduce some temporal correlation to the noise
-        noise[i] = 0.95 * noise[i-1] + 0.05 * noise[i]
+        noise[i] = ar * noise[i-1] + innov * raw[i]
+
+    # Occasional clutter spikes (~1% of timesteps, 5x amplitude)
+    spike_mask = np.random.rand(len(t)) < 0.01
+    noise[spike_mask] *= 5.0
+
     snap += noise
-    if np.any(np.isnan(snap)) or np.any(np.isinf(snap)):
-        print(f"Warning: Invalid values in track for v0={v0}, theta={theta}")
+    snap = np.where(np.isfinite(snap), snap, 0.0)
     return snap.astype(np.float32)
 
 
@@ -78,7 +106,7 @@ def generate_all(n_tracks=N_TRACKS):
             theta = np.random.normal(s["th_mu"], s["th_sigma"])
             trk = simulate_track(v0, theta)
 
-            idx = np.arange(TIMESTEPS) + 5
+            idx = np.arange(TIMESTEPS) + 50   # 5 seconds ahead (50 * 0.1s)
             idx[idx >= TIMESTEPS] = TIMESTEPS - 1
             future_pos = trk[idx, 0]
             targets.append(future_pos)
@@ -114,7 +142,7 @@ def generate_all(n_tracks=N_TRACKS):
     with open(f"{DATA_DIR}/norm_stats.pkl", 'wb') as f:
         pickle.dump(norm_stats, f)
 
-    print(f"✅ Dataset generated: {len(all_data)} samples")
+    print(f" Dataset generated: {len(all_data)} samples")
     print(f"Data mean: {data_mean}")
     print(f"Data std: {data_std}")
     print(f"Target mean: {target_mean:.2f}, std: {target_std:.2f}")

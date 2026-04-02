@@ -15,13 +15,26 @@ class MCDropoutNet(pl.LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
-        # CNN backbone
-        self.conv = nn.Sequential(
+        # Shared stem: 4 → 64
+        self.stem = nn.Sequential(
             nn.Conv1d(4, 64, 7, padding=3), nn.BatchNorm1d(64), nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Conv1d(64, 128, 5, padding=2), nn.BatchNorm1d(128), nn.ReLU(),
+        )
+
+        # Multi-scale dilated branches (all output 64 channels, then concat → 128)
+        # Branch A: fine-grained (dilation=1, receptive field ~5 steps)
+        self.branch_a = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1, dilation=1), nn.BatchNorm1d(64), nn.ReLU(),
+        )
+        # Branch B: medium-range (dilation=4, receptive field ~25 steps)
+        self.branch_b = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=4, dilation=4), nn.BatchNorm1d(64), nn.ReLU(),
+        )
+
+        # Merge branches: 128 → 128
+        self.merge = nn.Sequential(
+            nn.Conv1d(128, 128, 1), nn.BatchNorm1d(128), nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Conv1d(128, 128, 3, padding=1), nn.BatchNorm1d(128), nn.ReLU(),
         )
 
         # RNN
@@ -32,43 +45,63 @@ class MCDropoutNet(pl.LightningModule):
         self.attention = nn.MultiheadAttention(hidden_dim, num_heads=8,
                                                batch_first=True, dropout=dropout_rate)
 
-        # Classification head
+        # Classification head — uses mean-pooled context (global summary)
         self.cls_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(),
             nn.Dropout(dropout_rate),
             nn.Linear(hidden_dim // 2, 3)
         )
 
-        # Regression head
+        # Per-timestep regression head — predicts DELTA from current range.
+        # Since future_range ≈ current_range + small_change, learning the delta
+        # is much easier than learning the absolute value, reducing RMSE significantly.
+        # 3 layers for more expressive capacity.
         self.reg_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim // 2, 600)
+            nn.Linear(hidden_dim // 2, hidden_dim // 4), nn.ReLU(),
+            nn.Linear(hidden_dim // 4, 1)
         )
 
         self.acc = Accuracy(task="multiclass", num_classes=3)
         self.cls_weight = nn.Parameter(torch.tensor(1.0))
-        self.reg_weight = nn.Parameter(torch.tensor(0.1))
+        self.reg_weight = nn.Parameter(torch.tensor(1.0))
 
     def forward(self, x):
-        x = x.transpose(1, 2)          # (B, 4, 600)
-        x = self.conv(x)               # (B, 128, 600)
-        x = x.transpose(1, 2)          # (B, 600, 128)
+        # x: (B, T, 4) — normalized, channel 0 is range
+        current_range = x[:, :, 0]           # (B, T) — normalized current range
 
-        rnn_out, _ = self.rnn(x)
-        attn_out, _ = self.attention(rnn_out, rnn_out, rnn_out)
-        pooled = torch.mean(attn_out, dim=1)
+        x = x.transpose(1, 2)               # (B, 4, T)
+        x = self.stem(x)                     # (B, 64, T)
 
-        return self.cls_head(pooled), self.reg_head(pooled)
+        # Multi-scale branches in parallel
+        a = self.branch_a(x)                 # (B, 64, T)
+        b = self.branch_b(x)                 # (B, 64, T)
+        x = self.merge(torch.cat([a, b], dim=1))  # (B, 128, T)
+
+        x = x.transpose(1, 2)               # (B, T, 128)
+        rnn_out, _ = self.rnn(x)             # (B, T, hidden_dim)
+        attn_out, _ = self.attention(rnn_out, rnn_out, rnn_out)  # (B, T, hidden_dim)
+
+        # Classification: global mean-pool
+        pooled  = torch.mean(attn_out, dim=1)           # (B, hidden_dim)
+        cls_out = self.cls_head(pooled)                 # (B, 3)
+
+        # Regression: predict delta, then add current range (residual connection)
+        # This way the model only learns the small change, not the absolute value
+        reg_delta = self.reg_head(attn_out).squeeze(-1) # (B, T)
+        reg_out   = current_range + reg_delta           # (B, T)
+
+        return cls_out, reg_out
 
     def _shared_step(self, batch):
         x, cls_label, reg_target = batch
         cls_out, reg_out = self(x)
         cls_loss = F.cross_entropy(cls_out, cls_label)
-        reg_loss = F.mse_loss(reg_out, reg_target)
+        reg_loss = F.smooth_l1_loss(reg_out, reg_target)
         loss = self.cls_weight.abs() * cls_loss + self.reg_weight.abs() * reg_loss
-        acc = self.acc(cls_out.argmax(dim=-1), cls_label)
-        rmse = torch.sqrt(reg_loss)
+        acc  = self.acc(cls_out.argmax(dim=-1), cls_label)
+        rmse = torch.sqrt(F.mse_loss(reg_out, reg_target))
         return loss, cls_loss, reg_loss, acc, rmse
 
     def training_step(self, batch, batch_idx):
@@ -104,9 +137,13 @@ class MCDropoutNet(pl.LightningModule):
         if n_samples is None:
             n_samples = self.mc_samples
 
-        self.train()
-        cls_predictions, reg_predictions = [], []
+        # Keep BatchNorm in eval mode — only re-enable Dropout layers.
+        self.eval()
+        for m in self.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
 
+        cls_predictions, reg_predictions = [], []
         with torch.no_grad():
             for _ in range(n_samples):
                 cls_out, reg_out = self.forward(x)
@@ -117,8 +154,8 @@ class MCDropoutNet(pl.LightningModule):
 
         cls_stack = torch.stack(cls_predictions)
         reg_stack = torch.stack(reg_predictions)
-        cls_mean = cls_stack.mean(0)
-        cls_std = cls_stack.std(0)
+        cls_mean  = cls_stack.mean(0)
+        cls_std   = cls_stack.std(0)
         cls_entropy = -torch.sum(cls_mean * torch.log(cls_mean + 1e-9), dim=-1)
 
         return {

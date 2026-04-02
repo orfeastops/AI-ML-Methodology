@@ -29,17 +29,17 @@ def export_to_onnx(model, save_path="radar_model.onnx"):
             input_names=['input'], output_names=['classification', 'regression'],
             dynamic_axes={'input': {0: 'batch_size'}, 'classification': {0: 'batch_size'}, 'regression': {0: 'batch_size'}}
         )
-        print(f"✅ Model exported to {save_path}")
+        print(f" Model exported to {save_path}")
         onnx_model = onnx.load(save_path)
         onnx.checker.check_model(onnx_model)
-        print("✅ ONNX model verification passed")
+        print(" ONNX model verification passed")
     except Exception as e:
-        print(f"❌ ONNX export failed: {e}")
+        print(f" ONNX export failed: {e}")
         raise
     return save_path
 
 def benchmark_onnx_model(onnx_path, test_loader, n_runs=100):
-    print("🚀 Benchmarking ONNX model...")
+    print(" Benchmarking ONNX model...")
     session = ort.InferenceSession(onnx_path, providers=providers)
     x_sample, _, _ = next(iter(test_loader))
     x_sample = x_sample.numpy()
@@ -57,13 +57,13 @@ def benchmark_onnx_model(onnx_path, test_loader, n_runs=100):
 
     avg_time = np.mean(times) * 1000
     std_time = np.std(times) * 1000
-    print(f"✅ ONNX Inference (batch={x_sample.shape[0]}): {avg_time:.2f} ± {std_time:.2f} ms")
+    print(f" ONNX Inference (batch={x_sample.shape[0]}): {avg_time:.2f} ± {std_time:.2f} ms")
     print(f"   Throughput: {x_sample.shape[0] / (avg_time / 1000):.1f} samples/sec")
     return avg_time, std_time
 
 # Comprehensive Benchmarking
 def comprehensive_benchmark(model, test_loader, save_results=True):
-    print("🔍 Running comprehensive benchmark...")
+    print(" Running comprehensive benchmark...")
     model.eval()
     device = next(model.parameters()).device
 
@@ -116,7 +116,7 @@ def comprehensive_benchmark(model, test_loader, save_results=True):
         'avg_regression_uncertainty': reg_uncertainty.mean().item(),
     }
 
-    print("\n📊 BENCHMARK RESULTS:"); print("="*50)
+    print("\n BENCHMARK RESULTS:"); print("="*50)
     print(f"Classification Accuracy: {cls_accuracy:.4f}")
     print(f"Regression RMSE (denorm): {reg_rmse:.2f} meters")
     print(f"Regression MAE (denorm):  {reg_mae:.2f} meters")
@@ -133,7 +133,7 @@ def comprehensive_benchmark(model, test_loader, save_results=True):
 
 # Noise Robustness Testing
 def test_noise_robustness(model, base_noise_std=NOISE_STD, n_samples=500):
-    print("🔬 Testing noise robustness...")
+    print(" Testing noise robustness...")
     noise_levels = [0.5, 1.0, 1.5, 2.0, 3.0]
     results = {}
 
@@ -145,7 +145,7 @@ def test_noise_robustness(model, base_noise_std=NOISE_STD, n_samples=500):
     data_std = torch.tensor(norm['data_std'], dtype=torch.float32, device=device)
 
     for mult in noise_levels:
-        print(f"  ➜   Testing at {mult}× noise level")
+        print(f"     Testing at {mult}× noise level")
         xs, ys = [], []
 
         for _ in range(n_samples):
